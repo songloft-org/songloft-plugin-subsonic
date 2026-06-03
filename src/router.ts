@@ -74,7 +74,7 @@ router.get('/lists/:id/items', async (req: HTTPRequest, params) => {
   if (!config) {
     return jsonResponse({ error: 'Config not found' }, 404)
   }
-  
+
   // Parse query string manually or assume query parsing is available if not, but we can do simple regex
   // plugin-sdk passes req.query as string.
   let pathId = ''
@@ -82,7 +82,7 @@ router.get('/lists/:id/items', async (req: HTTPRequest, params) => {
     const match = req.query.match(/(?:^|&)id=([^&]*)/)
     if (match) pathId = decodeURIComponent(match[1])
   }
-  
+
   try {
     if (!pathId || pathId === 'root') {
       // 根目录：获取 Artists
@@ -120,9 +120,9 @@ router.post('/api/search', createSearchHandler({
   search: async (keyword: string, page = 1, pageSize = 20) => {
     const configs = await getConfigs()
     if (configs.length === 0) return []
-    
+
     const results: SearchResultItem[] = []
-    
+
     // 并发搜索所有配置的服务器
     await Promise.all(configs.map(async (config) => {
       try {
@@ -145,7 +145,7 @@ router.post('/api/search', createSearchHandler({
         console.error('Subsonic search error for ' + config.name + ':', String(e))
       }
     }))
-    
+
     return results
   }
 }))
@@ -156,25 +156,125 @@ router.post('/api/music/url', createMusicUrlHandler({
     const configName = sourceData.configName as string
     const songId = sourceData.songId as string
     if (!configName || !songId) throw new Error('Invalid source_data')
-    
+
     const config = await getConfig(configName)
     if (!config) throw new Error('Subsonic config not found: ' + configName)
-    
+
     return getStreamUrl(config, songId)
   }
 }))
+
+// POST /api/search/topOne — 搜索+匹配+URL解析三合一，返回最佳匹配的可播放 URL
+// 供 miot-plus 等插件在本地索引找不到歌曲时调用
+router.post('/api/search/topOne', async (req: HTTPRequest) => {
+  const body = parseBody(req)
+  const keyword = String(body.keyword || '').trim()
+  const hint: { title?: string; artist?: string; duration?: number } | undefined = body.hint
+  const quality = String(body.quality || '320k').trim()
+
+  if (!keyword) return jsonResponse({ code: 400, msg: '缺少 keyword', data: null }, 400)
+
+  const configs = await getConfigs()
+  if (configs.length === 0) {
+    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: 404, msg: 'song not found', data: null }) }
+  }
+
+  // 跨所有 Subsonic 服务器并行搜索，每服务器取第1页最多10条
+  const allCandidates: Array<{ score: number; item: any; configName: string }> = []
+  const searchResults = await Promise.allSettled(
+    configs.map(async (config) => {
+      try {
+        const songs = await searchSongs(config, keyword, 1, 10)
+        return { configName: config.name, items: songs }
+      } catch {
+        return null
+      }
+    }),
+  )
+
+  for (const result of searchResults) {
+    if (result.status !== 'fulfilled' || !result.value) continue
+    const { configName, items } = result.value
+    for (const item of items) {
+      const title = String(item.title || item.name || '')
+      const artist = String(item.artist || '')
+      if (!title) continue
+
+      let score = 0
+      if (hint) {
+        // 评分逻辑：title 和 artist 匹配度
+        if (hint.title) {
+          if (title === hint.title) score += 0.5
+          else if (title.includes(hint.title) || hint.title.includes(title)) score += 0.3
+        }
+        if (hint.artist) {
+          if (artist === hint.artist) score += 0.3
+          else if (artist.includes(hint.artist) || hint.artist.includes(artist)) score += 0.15
+        }
+      } else {
+        // 无 hint 时，给所有有效结果一个基础分，保证能返回
+        score = 1
+      }
+
+      if (score < 0.4) continue
+      allCandidates.push({ score, item, configName })
+    }
+  }
+
+  if (allCandidates.length === 0) {
+    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: 404, msg: 'song not found', data: null }) }
+  }
+
+  // 按评分降序排列，依次尝试获取 URL
+  allCandidates.sort((a, b) => b.score - a.score)
+
+  let lastError = ''
+  for (const candidate of allCandidates) {
+    const { item, configName } = candidate
+    const config = await getConfig(configName)
+    if (!config) continue
+    try {
+      const url = getStreamUrl(config, item.id)
+      if (url) {
+        return {
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            code: 0,
+            msg: 'success',
+            data: {
+              title: item.title || item.name || '',
+              artist: item.artist || '',
+              album: item.album || '',
+              duration: item.duration || 0,
+              cover_url: item.coverArt ? getStreamUrl(config, item.coverArt).replace('stream', 'getCoverArt') : undefined,
+              url,
+              source_data: { configName, songId: item.id },
+            },
+          }),
+        }
+      }
+    } catch (e: any) {
+      lastError = e.message || String(e)
+      // 单个失败继续尝试下一个候选
+    }
+  }
+
+  console.warn(`[search/topOne] 所有候选 URL 获取均失败，最后错误: ${lastError}`)
+  return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: 404, msg: 'song not found', data: null }) }
+})
 
 // 新增前端 API - 扁平化搜索
 router.get('/lists/:id/search', async (req: HTTPRequest, params) => {
   const config = await getConfig(params.id)
   if (!config) return jsonResponse({ error: 'Config not found' }, 404)
-  
+
   let keyword = ''
   if (req.query) {
     const match = req.query.match(/(?:^|&)q=([^&]*)/)
     if (match) keyword = decodeURIComponent(match[1])
   }
-  
+
   try {
     const songs = await searchSongs(config, keyword, 1, 100)
     return jsonResponse(songs.map(item => ({
@@ -200,7 +300,7 @@ router.get('/lists/:id/search', async (req: HTTPRequest, params) => {
 router.get('/lists/:id/starred', async (req: HTTPRequest, params) => {
   const config = await getConfig(params.id)
   if (!config) return jsonResponse({ error: 'Config not found' }, 404)
-  
+
   try {
     const songs = await getStarred(config)
     return jsonResponse(songs.map((item: any) => ({
@@ -226,7 +326,7 @@ router.get('/lists/:id/starred', async (req: HTTPRequest, params) => {
 router.get('/lists/:id/random', async (req: HTTPRequest, params) => {
   const config = await getConfig(params.id)
   if (!config) return jsonResponse({ error: 'Config not found' }, 404)
-  
+
   try {
     const songs = await getRandomSongs(config, 50)
     return jsonResponse(songs.map((item: any) => ({
@@ -252,17 +352,17 @@ router.get('/lists/:id/random', async (req: HTTPRequest, params) => {
 router.get('/lists/:id/lyric', async (req: HTTPRequest, params) => {
   const config = await getConfig(params.id)
   if (!config) return jsonResponse({ error: 'Config not found' }, 404)
-  
+
   let artist = ''
   let title = ''
   if (req.query) {
     const artistMatch = req.query.match(/(?:^|&)artist=([^&]*)/)
     if (artistMatch) artist = decodeURIComponent(artistMatch[1])
-    
+
     const titleMatch = req.query.match(/(?:^|&)title=([^&]*)/)
     if (titleMatch) title = decodeURIComponent(titleMatch[1])
   }
-  
+
   try {
     const lyric = await getLyrics(config, artist, title)
     return jsonResponse({
