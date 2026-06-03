@@ -1,18 +1,11 @@
 // global songloft
 import { SubsonicConfig } from './config'
 
-function stringToHex(str: string): string {
-  // Simple UTF-8 to Hex
-  let hex = ''
-  for (let i = 0; i < str.length; i++) {
-    const code = str.charCodeAt(i)
-    if (code < 128) {
-      hex += code.toString(16).padStart(2, '0')
-    } else {
-      hex += encodeURIComponent(str.charAt(i)).replace(/%/g, '').toLowerCase()
-    }
+function md5(str: string): string {
+  if (typeof __go_crypto_md5 !== 'undefined') {
+    return __go_crypto_md5(str)
   }
-  return hex
+  throw new Error("MD5 is not available in this environment")
 }
 
 function buildUrl(config: SubsonicConfig, endpoint: string, params: Record<string, string> = {}): string {
@@ -25,7 +18,11 @@ function buildUrl(config: SubsonicConfig, endpoint: string, params: Record<strin
     qs.push(`t=${encodeURIComponent(config.token)}`)
     qs.push(`s=${encodeURIComponent(config.salt)}`)
   } else if (config.password) {
-    qs.push(`p=enc:${stringToHex(config.password)}`) // Hex encoded password
+    // 强制丢弃 p=enc: 模式，自动静默升级为 MD5 Token 模式以防日志泄露密码
+    const salt = Math.random().toString(36).substring(2, 10)
+    const token = md5(config.password + salt)
+    qs.push(`t=${encodeURIComponent(token)}`)
+    qs.push(`s=${encodeURIComponent(salt)}`)
   }
   
   qs.push(`v=${encodeURIComponent(config.version || '1.16.1')}`)
