@@ -164,9 +164,9 @@ router.post('/api/music/url', createMusicUrlHandler({
   }
 }))
 
-// POST /api/search/topOne — 搜索+匹配+URL解析三合一，返回最佳匹配的可播放 URL
+// POST /api/search/topone — 搜索+匹配+URL解析三合一，返回最佳匹配的可播放 URL
 // 供 miot-plus 等插件在本地索引找不到歌曲时调用
-router.post('/api/search/topOne', async (req: HTTPRequest) => {
+router.post('/api/search/topone', async (req: HTTPRequest) => {
   const body = parseBody(req)
   const keyword = String(body.keyword || '').trim()
   const hint: { title?: string; artist?: string; duration?: number } | undefined = body.hint
@@ -260,7 +260,7 @@ router.post('/api/search/topOne', async (req: HTTPRequest) => {
     }
   }
 
-  console.warn(`[search/topOne] 所有候选 URL 获取均失败，最后错误: ${lastError}`)
+  console.warn(`[search/topone] 所有候选 URL 获取均失败，最后错误: ${lastError}`)
   return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: 404, msg: 'song not found', data: null }) }
 })
 
