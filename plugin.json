@@ -1,12 +1,12 @@
 {
   "$schema": "https://raw.githubusercontent.com/songloft-org/plugin-toolchain/main/schemas/plugin.schema.json",
-  "name": "Subsonic 音乐源",
-  "version": "1.0.3",
-  "description": "通过 Subsonic API 接入外部音乐库 (如 Navidrome)",
+  "name": "统一音乐源",
+  "version": "1.0.0",
+  "description": "支持 Subsonic API 和 WebDAV 协议的统一音乐源插件",
   "author": "Songloft Team",
-  "homepage": "https://github.com/songloft-org/songloft-plugin-subsonic",
+  "homepage": "https://github.com/songloft-org/songloft-plugin-unified",
   "license": "Apache-2.0",
-  "entryPath": "subsonic",
+  "entryPath": "unified",
   "main": "main.js",
   "minHostVersion": "1.3.0",
   "permissions": [
@@ -16,7 +16,7 @@
     "playlists.read",
     "playlists.write"
   ],
-  "updateUrl": "https://raw.githubusercontent.com/songloft-org/songloft-plugin-subsonic/main/manifest.json",
+  "updateUrl": "https://raw.githubusercontent.com/songloft-org/songloft-plugin-unified/main/manifest.json",
   "entryHash": "",
   "zipHash": ""
 }

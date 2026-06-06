@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Subsonic 音乐源</title>
+    <title>统一音乐源</title>
     <link rel="stylesheet" href="static/css/fonts.css">
     <link rel="stylesheet" href="static/css/style.css">
     <script>if(new URLSearchParams(location.search).has('embed'))document.documentElement.classList.add('embed')</script>
@@ -12,7 +12,7 @@
     <!-- AppBar -->
     <header class="app-bar">
         <span class="material-symbols-outlined">library_music</span>
-        <h1>Subsonic 音乐源</h1>
+        <h1>统一音乐源</h1>
         <button class="btn-icon" id="refreshBtn" title="刷新">
             <span class="material-symbols-outlined">refresh</span>
         </button>
@@ -25,26 +25,33 @@
             <div class="card">
                 <div class="card-header">
                     <span class="material-symbols-outlined">add_link</span>
-                    添加 Subsonic (Navidrome) 服务器
+                    添加服务器
                 </div>
                 <div class="card-body">
                     <div class="form-group">
+                        <label class="form-label">服务器类型</label>
+                        <select class="text-field" id="serverType">
+                            <option value="subsonic">Subsonic (Navidrome 等)</option>
+                            <option value="dav">WebDAV</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-top:12px">
                         <label class="form-label">配置名称</label>
-                        <input type="text" class="text-field" id="subName" placeholder="例如：我的 Navidrome">
+                        <input type="text" class="text-field" id="subName" placeholder="例如：我的音乐库">
                     </div>
                     <div class="form-group" style="margin-top:12px">
                         <label class="form-label">服务器地址</label>
                         <input type="text" class="text-field" id="subUrl" placeholder="例如：https://music.example.com">
                     </div>
-                    <div class="form-group" style="margin-top:12px">
+                    <div class="form-group" style="margin-top:12px" id="usernameGroup">
                         <label class="form-label">用户名</label>
                         <input type="text" class="text-field" id="subUsername" placeholder="用户名">
                     </div>
-                    <div class="form-group" style="margin-top:12px">
+                    <div class="form-group" style="margin-top:12px" id="passwordGroup">
                         <label class="form-label">密码 / Token</label>
                         <input type="password" class="text-field" id="subPassword" placeholder="密码 (或 Token 如果配置了 Salt)">
                     </div>
-                    <div class="form-group" style="margin-top:12px">
+                    <div class="form-group" style="margin-top:12px" id="saltGroup">
                         <label class="form-label">Salt (选填)</label>
                         <input type="text" class="text-field" id="subSalt" placeholder="如果使用 Token 认证，填写 Salt">
                     </div>
@@ -94,8 +101,9 @@
                             <button class="btn-filled" id="searchBtn" style="padding:0 16px;">搜索</button>
                         </div>
                         <div class="chips-container" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;">
-                            <button class="chip" id="chipStarred"><span class="material-symbols-outlined" style="font-size:16px;">favorite</span> 我的收藏</button>
-                            <button class="chip" id="chipRandom"><span class="material-symbols-outlined" style="font-size:16px;">shuffle</span> 随便听听</button>
+                            <button class="chip" id="chipStarred" style="display:none;"><span class="material-symbols-outlined" style="font-size:16px;">favorite</span> 我的收藏</button>
+                            <button class="chip" id="chipRandom" style="display:none;"><span class="material-symbols-outlined" style="font-size:16px;">shuffle</span> 随便听听</button>
+                            <button class="chip" id="chipPlaylists" style="display:none;"><span class="material-symbols-outlined" style="font-size:16px;">playlist_play</span> 服务器歌单</button>
                         </div>
                     </div>
                 </div>
@@ -163,15 +171,15 @@
                     <label class="form-label">服务器地址</label>
                     <input type="text" class="text-field" id="editUrl">
                 </div>
-                <div class="form-group" style="margin-top:12px">
+                <div class="form-group" style="margin-top:12px" id="editUsernameGroup">
                     <label class="form-label">用户名</label>
                     <input type="text" class="text-field" id="editUsername">
                 </div>
-                <div class="form-group" style="margin-top:12px">
+                <div class="form-group" style="margin-top:12px" id="editPasswordGroup">
                     <label class="form-label">密码 / Token</label>
                     <input type="password" class="text-field" id="editPassword" placeholder="留空则保持不变">
                 </div>
-                <div class="form-group" style="margin-top:12px">
+                <div class="form-group" style="margin-top:12px" id="editSaltGroup">
                     <label class="form-label">Salt (选填)</label>
                     <input type="text" class="text-field" id="editSalt">
                 </div>
@@ -201,7 +209,7 @@
             <div class="dialog-content">
                 <div class="form-group">
                     <label class="form-label">歌单名称</label>
-                    <input type="text" class="text-field" id="playlistName" placeholder="例如：Subsonic精选">
+                    <input type="text" class="text-field" id="playlistName" placeholder="例如：精选音乐">
                 </div>
             </div>
             <div class="dialog-actions">

@@ -1,7 +1,7 @@
 {
-  "name": "subsonic",
-  "version": "1.0.3",
-  "description": "通过 Subsonic API 接入外部音乐库 (如 Navidrome)",
+  "name": "unified-music-source",
+  "version": "1.0.0",
+  "description": "统一音乐源插件，支持 Subsonic API 和 WebDAV 协议",
   "private": true,
   "scripts": {
     "build": "songloft-plugin build",

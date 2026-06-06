@@ -1,7 +1,20 @@
 import { createRouter, jsonResponse, createSearchHandler, createMusicUrlHandler } from '@songloft/plugin-sdk'
 import type { HTTPRequest, SearchResultItem } from '@songloft/plugin-sdk'
-import { getConfigs, saveConfigs, getConfig, SubsonicConfig } from './config'
-import { ping, getIndexes, getMusicDirectory, getStreamUrl, searchSongs, getStarred, getRandomSongs, getLyrics } from './client'
+import { getConfigs, saveConfigs, getConfig, UnifiedConfig, isSubsonicConfig, isDavConfig } from './config'
+import { 
+  pingConfig, 
+  getItems, 
+  getStreamUrl, 
+  searchSongs, 
+  getStarred, 
+  getRandomSongs, 
+  getLyrics,
+  getPlaylists,
+  getPlaylist,
+  getSubsonicStreamUrl,
+  buildDavStreamUrl,
+  propfindDav
+} from './client'
 
 function parseBody(req: HTTPRequest): any {
   if (!req.body) return {}
@@ -17,29 +30,34 @@ function parseBody(req: HTTPRequest): any {
 
 const router = createRouter()
 
-// 列出所有配置的 Subsonic
+// 列出所有配置
 router.get('/lists', async (req: HTTPRequest) => {
   const configs = await getConfigs()
   return jsonResponse(configs.map(c => ({
     id: c.name,
     name: c.name,
     url: c.url,
-    username: c.username,
-    salt: c.salt
+    type: c.type,
+    username: 'username' in c ? c.username : undefined,
+    salt: 'salt' in c ? c.salt : undefined
   })))
 })
 
-// 添加/更新 Subsonic 配置
+// 添加/更新配置
 router.post('/lists', async (req: HTTPRequest) => {
-  const data = parseBody(req) as SubsonicConfig
+  const data = parseBody(req) as UnifiedConfig
   const configs = await getConfigs()
   const existing = configs.findIndex(c => c.name === data.name)
   if (existing >= 0) {
     const oldConfig = configs[existing]
-    // 密码留空则保留旧密码配置
-    if (!data.password && !data.token) {
-      data.password = oldConfig.password
-      data.token = oldConfig.token
+    if (!data.password && !('token' in data && data.token)) {
+      if ('password' in oldConfig) {
+        data.password = oldConfig.password
+      }
+      if ('token' in oldConfig && 'token' in data) {
+        data.token = oldConfig.token
+        data.salt = oldConfig.salt
+      }
     }
     configs[existing] = data
   } else {
@@ -61,55 +79,141 @@ router.delete('/lists/:id', async (req: HTTPRequest, params) => {
 router.post('/test', async (req: HTTPRequest) => {
   const data = parseBody(req)
   try {
-    const ok = await ping(data as SubsonicConfig)
+    const ok = await pingConfig(data as UnifiedConfig)
     return jsonResponse({ success: ok })
   } catch (e) {
     return jsonResponse({ success: false, error: String(e) })
   }
 })
 
-// 获取特定配置的目录项 (Artists 或 directory contents)
+// 获取特定配置的目录项
 router.get('/lists/:id/items', async (req: HTTPRequest, params) => {
   const config = await getConfig(params.id)
   if (!config) {
     return jsonResponse({ error: 'Config not found' }, 404)
   }
 
-  // Parse query string manually or assume query parsing is available if not, but we can do simple regex
-  // plugin-sdk passes req.query as string.
-  let pathId = ''
+  let pathOrId = ''
   if (req.query) {
-    const match = req.query.match(/(?:^|&)id=([^&]*)/)
-    if (match) pathId = decodeURIComponent(match[1])
+    if (isDavConfig(config)) {
+      const match = req.query.match(/(?:^|&)path=([^&]*)/)
+      if (match) pathOrId = decodeURIComponent(match[1])
+    } else {
+      const match = req.query.match(/(?:^|&)id=([^&]*)/)
+      if (match) pathOrId = decodeURIComponent(match[1])
+    }
   }
 
   try {
-    if (!pathId || pathId === 'root') {
-      // 根目录：获取 Artists
-      const artists = await getIndexes(config)
-      return jsonResponse(artists.map(a => ({
-        id: a.id,
-        name: a.name,
-        type: 'directory'
-      })))
-    } else {
-      // 获取子目录内容
-      const items = await getMusicDirectory(config, pathId)
-      return jsonResponse(items.map(item => ({
-        id: item.id,
-        name: item.title || item.name,
-        type: item.isDir ? 'directory' : 'file',
-        artist: item.artist,
-        album: item.album,
-        duration: item.duration,
+    const items = await getItems(config, pathOrId)
+    
+    if (isSubsonicConfig(config)) {
+      if (!pathOrId || pathOrId === 'root') {
+        return jsonResponse(items.map(a => ({
+          id: a.id,
+          name: a.name,
+          type: 'directory'
+        })))
+      } else {
+        return jsonResponse(items.map(item => ({
+          id: item.id,
+          name: item.title || item.name,
+          type: item.isDir ? 'directory' : 'file',
+          artist: item.artist,
+          album: item.album,
+          duration: item.duration,
+          size: item.size,
+          streamUrl: item.isDir ? '' : getStreamUrl(config, item.id),
+          coverArt: item.coverArt ? getSubsonicStreamUrl(config, item.coverArt).replace('stream', 'getCoverArt') : undefined,
+          lyric: `/api/plugin/songloft-plugin-unified/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`,
+          lyric_source: 'url',
+          lyricUrl: `/api/plugin/songloft-plugin-unified/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`
+        })))
+      }
+    } else if (isDavConfig(config)) {
+      const configUrlObj = new URL(config.url)
+      const configUrlPath = decodeURIComponent(configUrlObj.pathname).replace(/\/$/, '')
+      const reqPath = (pathOrId || '/') === '/' ? '' : pathOrId.replace(/\/$/, '')
+      const expectedPathname = configUrlPath + reqPath
+
+      const filteredItems = items.filter(i => {
+        let itemPathname = i.filename
+        if (itemPathname.startsWith('http')) {
+          try {
+            itemPathname = new URL(itemPathname).pathname
+          } catch {}
+        }
+        itemPathname = decodeURIComponent(itemPathname).replace(/\/$/, '')
+        return itemPathname !== expectedPathname
+      })
+
+      return jsonResponse(filteredItems.map(item => ({
+        id: item.filename,
+        name: item.basename,
+        type: item.type,
         size: item.size,
-        streamUrl: item.isDir ? '' : getStreamUrl(config, item.id),
-        coverArt: item.coverArt ? getStreamUrl(config, item.coverArt).replace('stream', 'getCoverArt') : undefined,
-        lyric: `/api/plugin/songloft-plugin-subsonic/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`,
-        lyric_source: 'url',
-        lyricUrl: `/api/plugin/songloft-plugin-subsonic/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`
+        streamUrl: item.type === 'file' ? getStreamUrl(config, item.filename) : ''
       })))
     }
+
+    return jsonResponse([])
+  } catch (e) {
+    return jsonResponse({ error: String(e) }, 500)
+  }
+})
+
+// 获取歌单列表
+router.get('/lists/:id/playlists', async (req: HTTPRequest, params) => {
+  const config = await getConfig(params.id)
+  if (!config) {
+    return jsonResponse({ error: 'Config not found' }, 404)
+  }
+
+  try {
+    if (!isSubsonicConfig(config)) {
+      return jsonResponse([])
+    }
+
+    const playlists = await getPlaylists(config)
+    return jsonResponse(playlists.map(p => ({
+      id: p.id,
+      name: p.name,
+      songCount: p.songCount,
+      comment: p.comment,
+      coverArt: p.coverArt ? getSubsonicStreamUrl(config, p.coverArt).replace('stream', 'getCoverArt') : undefined
+    })))
+  } catch (e) {
+    return jsonResponse({ error: String(e) }, 500)
+  }
+})
+
+// 获取歌单中的歌曲
+router.get('/lists/:id/playlists/:playlistId', async (req: HTTPRequest, params) => {
+  const config = await getConfig(params.id)
+  if (!config) {
+    return jsonResponse({ error: 'Config not found' }, 404)
+  }
+
+  try {
+    if (!isSubsonicConfig(config)) {
+      return jsonResponse([])
+    }
+
+    const songs = await getPlaylist(config, params.playlistId)
+    return jsonResponse(songs.map(item => ({
+      id: item.id,
+      name: item.title,
+      type: 'file',
+      artist: item.artist,
+      album: item.album,
+      duration: item.duration,
+      size: item.size,
+      streamUrl: getStreamUrl(config, item.id),
+      coverArt: item.coverArt ? getSubsonicStreamUrl(config, item.coverArt).replace('stream', 'getCoverArt') : undefined,
+      lyric: `/api/plugin/songloft-plugin-unified/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || '')}`,
+      lyric_source: 'url',
+      lyricUrl: `/api/plugin/songloft-plugin-unified/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || '')}`
+    })))
   } catch (e) {
     return jsonResponse({ error: String(e) }, 500)
   }
@@ -123,9 +227,10 @@ router.post('/api/search', createSearchHandler({
 
     const results: SearchResultItem[] = []
 
-    // 并发搜索所有配置的服务器
     await Promise.all(configs.map(async (config) => {
       try {
+        if (!isSubsonicConfig(config)) return
+
         const songs = await searchSongs(config, keyword, page, pageSize)
         for (const s of songs) {
           results.push({
@@ -133,16 +238,15 @@ router.post('/api/search', createSearchHandler({
             artist: s.artist,
             album: s.album,
             duration: s.duration || 0,
-            cover_url: s.coverArt ? getStreamUrl(config, s.coverArt).replace('stream', 'getCoverArt') : undefined,
-            source_data: { configName: config.name, songId: s.id },
-            lyric: `/api/plugin/songloft-plugin-subsonic/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(s.artist || '')}&title=${encodeURIComponent(s.title || '')}`,
+            cover_url: s.coverArt ? getSubsonicStreamUrl(config, s.coverArt).replace('stream', 'getCoverArt') : undefined,
+            source_data: { configName: config.name, songId: s.id, type: config.type },
+            lyric: `/api/plugin/songloft-plugin-unified/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(s.artist || '')}&title=${encodeURIComponent(s.title || '')}`,
             lyric_source: 'url',
-            lyricUrl: `/api/plugin/songloft-plugin-subsonic/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(s.artist || '')}&title=${encodeURIComponent(s.title || '')}`
+            lyricUrl: `/api/plugin/songloft-plugin-unified/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(s.artist || '')}&title=${encodeURIComponent(s.title || '')}`
           })
         }
       } catch (e) {
-        // 忽略单个服务器错误，但打印日志方便排查
-        console.error('Subsonic search error for ' + config.name + ':', String(e))
+        console.error('Unified search error for ' + config.name + ':', String(e))
       }
     }))
 
@@ -155,17 +259,26 @@ router.post('/api/music/url', createMusicUrlHandler({
   resolveUrl: async (sourceData: Record<string, unknown>) => {
     const configName = sourceData.configName as string
     const songId = sourceData.songId as string
-    if (!configName || !songId) throw new Error('Invalid source_data')
+    const path = sourceData.path as string
+    const type = sourceData.type as string
+    if (!configName) throw new Error('Invalid source_data')
 
     const config = await getConfig(configName)
-    if (!config) throw new Error('Subsonic config not found: ' + configName)
+    if (!config) throw new Error('Config not found: ' + configName)
 
-    return getStreamUrl(config, songId)
+    if (type === 'subsonic' || isSubsonicConfig(config)) {
+      if (!songId) throw new Error('Invalid songId')
+      return getStreamUrl(config, songId)
+    } else if (type === 'dav' || isDavConfig(config)) {
+      if (!path) throw new Error('Invalid path')
+      return getStreamUrl(config, path)
+    }
+
+    throw new Error('Unsupported config type')
   }
 }))
 
-// POST /api/search/topone — 搜索+匹配+URL解析三合一，返回最佳匹配的可播放 URL
-// 供 miot-plus 等插件在本地索引找不到歌曲时调用
+// POST /api/search/topone — 搜索+匹配+URL解析三合一
 router.post('/api/search/topone', async (req: HTTPRequest) => {
   const body = parseBody(req)
   const keyword = String(body.keyword || '').trim()
@@ -179,13 +292,12 @@ router.post('/api/search/topone', async (req: HTTPRequest) => {
     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: 404, msg: 'song not found', data: null }) }
   }
 
-  // 跨所有 Subsonic 服务器并行搜索，每服务器取第1页最多10条
-  const allCandidates: Array<{ score: number; item: any; configName: string }> = []
+  const allCandidates: Array<{ score: number; item: any; configName: string; config: UnifiedConfig }> = []
   const searchResults = await Promise.allSettled(
-    configs.map(async (config) => {
+    configs.filter(isSubsonicConfig).map(async (config) => {
       try {
         const songs = await searchSongs(config, keyword, 1, 10)
-        return { configName: config.name, items: songs }
+        return { configName: config.name, config, items: songs }
       } catch {
         return null
       }
@@ -194,7 +306,7 @@ router.post('/api/search/topone', async (req: HTTPRequest) => {
 
   for (const result of searchResults) {
     if (result.status !== 'fulfilled' || !result.value) continue
-    const { configName, items } = result.value
+    const { configName, config, items } = result.value
     for (const item of items) {
       const title = String(item.title || item.name || '')
       const artist = String(item.artist || '')
@@ -202,7 +314,6 @@ router.post('/api/search/topone', async (req: HTTPRequest) => {
 
       let score = 0
       if (hint) {
-        // 评分逻辑：title 和 artist 匹配度
         if (hint.title) {
           if (title === hint.title) score += 0.5
           else if (title.includes(hint.title) || hint.title.includes(title)) score += 0.3
@@ -212,12 +323,11 @@ router.post('/api/search/topone', async (req: HTTPRequest) => {
           else if (artist.includes(hint.artist) || hint.artist.includes(artist)) score += 0.15
         }
       } else {
-        // 无 hint 时，给所有有效结果一个基础分，保证能返回
         score = 1
       }
 
       if (score < 0.4) continue
-      allCandidates.push({ score, item, configName })
+      allCandidates.push({ score, item, configName, config })
     }
   }
 
@@ -225,14 +335,11 @@ router.post('/api/search/topone', async (req: HTTPRequest) => {
     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: 404, msg: 'song not found', data: null }) }
   }
 
-  // 按评分降序排列，依次尝试获取 URL
   allCandidates.sort((a, b) => b.score - a.score)
 
   let lastError = ''
   for (const candidate of allCandidates) {
-    const { item, configName } = candidate
-    const config = await getConfig(configName)
-    if (!config) continue
+    const { item, configName, config } = candidate
     try {
       const url = getStreamUrl(config, item.id)
       if (url) {
@@ -247,16 +354,15 @@ router.post('/api/search/topone', async (req: HTTPRequest) => {
               artist: item.artist || '',
               album: item.album || '',
               duration: item.duration || 0,
-              cover_url: item.coverArt ? getStreamUrl(config, item.coverArt).replace('stream', 'getCoverArt') : undefined,
+              cover_url: item.coverArt ? getSubsonicStreamUrl(config, item.coverArt).replace('stream', 'getCoverArt') : undefined,
               url,
-              source_data: { configName, songId: item.id },
+              source_data: { configName, songId: item.id, type: config.type },
             },
           }),
         }
       }
     } catch (e: any) {
       lastError = e.message || String(e)
-      // 单个失败继续尝试下一个候选
     }
   }
 
@@ -268,6 +374,10 @@ router.post('/api/search/topone', async (req: HTTPRequest) => {
 router.get('/lists/:id/search', async (req: HTTPRequest, params) => {
   const config = await getConfig(params.id)
   if (!config) return jsonResponse({ error: 'Config not found' }, 404)
+
+  if (!isSubsonicConfig(config)) {
+    return jsonResponse([])
+  }
 
   let keyword = ''
   if (req.query) {
@@ -286,10 +396,10 @@ router.get('/lists/:id/search', async (req: HTTPRequest, params) => {
       duration: item.duration,
       size: item.size,
       streamUrl: getStreamUrl(config, item.id),
-      coverArt: item.coverArt ? getStreamUrl(config, item.coverArt).replace('stream', 'getCoverArt') : undefined,
-      lyric: `/api/plugin/songloft-plugin-subsonic/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`,
+      coverArt: item.coverArt ? getSubsonicStreamUrl(config, item.coverArt).replace('stream', 'getCoverArt') : undefined,
+      lyric: `/api/plugin/songloft-plugin-unified/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`,
       lyric_source: 'url',
-      lyricUrl: `/api/plugin/songloft-plugin-subsonic/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`
+      lyricUrl: `/api/plugin/songloft-plugin-unified/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`
     })))
   } catch (e) {
     return jsonResponse({ error: String(e) }, 500)
@@ -300,6 +410,10 @@ router.get('/lists/:id/search', async (req: HTTPRequest, params) => {
 router.get('/lists/:id/starred', async (req: HTTPRequest, params) => {
   const config = await getConfig(params.id)
   if (!config) return jsonResponse({ error: 'Config not found' }, 404)
+
+  if (!isSubsonicConfig(config)) {
+    return jsonResponse([])
+  }
 
   try {
     const songs = await getStarred(config)
@@ -312,10 +426,10 @@ router.get('/lists/:id/starred', async (req: HTTPRequest, params) => {
       duration: item.duration,
       size: item.size,
       streamUrl: getStreamUrl(config, item.id),
-      coverArt: item.coverArt ? getStreamUrl(config, item.coverArt).replace('stream', 'getCoverArt') : undefined,
-      lyric: `/api/plugin/songloft-plugin-subsonic/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`,
+      coverArt: item.coverArt ? getSubsonicStreamUrl(config, item.coverArt).replace('stream', 'getCoverArt') : undefined,
+      lyric: `/api/plugin/songloft-plugin-unified/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`,
       lyric_source: 'url',
-      lyricUrl: `/api/plugin/songloft-plugin-subsonic/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`
+      lyricUrl: `/api/plugin/songloft-plugin-unified/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`
     })))
   } catch (e) {
     return jsonResponse({ error: String(e) }, 500)
@@ -326,6 +440,10 @@ router.get('/lists/:id/starred', async (req: HTTPRequest, params) => {
 router.get('/lists/:id/random', async (req: HTTPRequest, params) => {
   const config = await getConfig(params.id)
   if (!config) return jsonResponse({ error: 'Config not found' }, 404)
+
+  if (!isSubsonicConfig(config)) {
+    return jsonResponse([])
+  }
 
   try {
     const songs = await getRandomSongs(config, 50)
@@ -338,10 +456,10 @@ router.get('/lists/:id/random', async (req: HTTPRequest, params) => {
       duration: item.duration,
       size: item.size,
       streamUrl: getStreamUrl(config, item.id),
-      coverArt: item.coverArt ? getStreamUrl(config, item.coverArt).replace('stream', 'getCoverArt') : undefined,
-      lyric: `/api/plugin/songloft-plugin-subsonic/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`,
+      coverArt: item.coverArt ? getSubsonicStreamUrl(config, item.coverArt).replace('stream', 'getCoverArt') : undefined,
+      lyric: `/api/plugin/songloft-plugin-unified/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`,
       lyric_source: 'url',
-      lyricUrl: `/api/plugin/songloft-plugin-subsonic/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`
+      lyricUrl: `/api/plugin/songloft-plugin-unified/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`
     })))
   } catch (e) {
     return jsonResponse({ error: String(e) }, 500)
@@ -373,7 +491,6 @@ router.get('/lists/:id/lyric', async (req: HTTPRequest, params) => {
       message: 'success'
     })
   } catch (e) {
-    // 即使失败也返回标准结构但 code != 0
     return jsonResponse({ code: 1, message: String(e) })
   }
 })

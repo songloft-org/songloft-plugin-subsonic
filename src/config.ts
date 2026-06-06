@@ -1,5 +1,7 @@
 // global songloft
 
+export type ConfigType = 'subsonic' | 'dav'
+
 export interface SubsonicConfig {
   url: string
   username: string
@@ -7,28 +9,48 @@ export interface SubsonicConfig {
   token?: string
   salt?: string
   name: string
-  version?: string // e.g. 1.16.1
+  version?: string
+  type: 'subsonic'
 }
 
-const CONFIG_KEY = 'subsonic_configs'
+export interface DavConfig {
+  url: string
+  username?: string
+  password?: string
+  name: string
+  type: 'dav'
+}
 
-export async function getConfigs(): Promise<SubsonicConfig[]> {
+export type UnifiedConfig = SubsonicConfig | DavConfig
+
+const CONFIG_KEY = 'unified_music_configs'
+
+export async function getConfigs(): Promise<UnifiedConfig[]> {
   try {
     const val = await songloft.storage.get(CONFIG_KEY)
     if (val) {
-      return JSON.parse(val) as SubsonicConfig[]
+      const configs = JSON.parse(val) as UnifiedConfig[]
+      return configs
     }
   } catch (err) {
-    songloft.logger.error('Failed to get subsonic configs', String(err))
+    songloft.logger.error('Failed to get unified configs', String(err))
   }
   return []
 }
 
-export async function saveConfigs(configs: SubsonicConfig[]): Promise<void> {
+export async function saveConfigs(configs: UnifiedConfig[]): Promise<void> {
   await songloft.storage.set(CONFIG_KEY, JSON.stringify(configs))
 }
 
-export async function getConfig(name: string): Promise<SubsonicConfig | undefined> {
+export async function getConfig(name: string): Promise<UnifiedConfig | undefined> {
   const configs = await getConfigs()
   return configs.find(c => c.name === name)
+}
+
+export function isSubsonicConfig(config: UnifiedConfig): config is SubsonicConfig {
+  return config.type === 'subsonic'
+}
+
+export function isDavConfig(config: UnifiedConfig): config is DavConfig {
+  return config.type === 'dav'
 }
