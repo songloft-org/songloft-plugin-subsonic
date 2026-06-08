@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/songloft-org/plugin-toolchain/main/schemas/plugin.schema.json",
   "name": "Subsonic 音乐源",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "通过 Subsonic API 接入外部音乐库 (如 Navidrome)",
   "author": "Songloft Team",
   "homepage": "https://github.com/songloft-org/songloft-plugin-subsonic",
