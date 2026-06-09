@@ -190,16 +190,56 @@ const handleStream: Handler = async (_req, query) => {
 
 const handleGetCoverArt: Handler = async (_req, query) => {
   const id = query.get('id') || ''
-  // coverArt id 可能是 "al-123" 或直接数字
   const numId = parseInt(id.replace(/^(al|ar)-/, ''))
   if (isNaN(numId)) {
     return { statusCode: 404, headers: {}, body: '' }
   }
-  const song = await songloft.songs.getById(numId)
-  if (!song?.coverPath) {
-    return { statusCode: 404, headers: {}, body: '' }
+  // 重定向到已有的封面端点（带 plugin token 认证）
+  const token = await songloft.plugin.getToken()
+  const coverUrl = `/api/v1/songs/${numId}/cover?access_token=${token}`
+  return {
+    statusCode: 302,
+    headers: { 'Location': coverUrl },
+    body: ''
   }
-  return { serveFile: { filePath: `music://${song.coverPath}` } }
+}
+
+const handleGetLyrics: Handler = async (_req, query) => {
+  const artist = query.get('artist') || ''
+  const title = query.get('title') || ''
+
+  // 通过搜索找到匹配的歌曲
+  let songId = 0
+  if (title) {
+    const songs = await songloft.songs.search(title)
+    const match = songs.find((s: any) =>
+      s.title === title || (artist && s.artist === artist && s.title === title)
+    )
+    if (match) songId = match.id
+  }
+
+  if (!songId) {
+    const r = okResponse(query, { lyrics: { artist, title } })
+    return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+  }
+
+  // 通过内部 API 获取歌词
+  try {
+    const token = await songloft.plugin.getToken()
+    const hostUrl = await songloft.plugin.getHostUrl()
+    const resp = await fetch(`${hostUrl}/api/v1/songs/${songId}/lyric?access_token=${token}`)
+    if (resp.ok) {
+      const data = await resp.json() as any
+      const lyric = data.lyric || ''
+      // 去掉 LRC 时间标签，Subsonic getLyrics 返回纯文本
+      const plainText = lyric.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').replace(/\[.*?\]\r?\n?/g, '').trim()
+      const r = okResponse(query, { lyrics: { artist, title, value: plainText } })
+      return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+    }
+  } catch {}
+
+  const r = okResponse(query, { lyrics: { artist, title } })
+  return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
 }
 
 // --- Playlists ---
@@ -304,6 +344,8 @@ const routes: Record<string, Handler> = {
   '/rest/download': handleStream,
   '/rest/getCoverArt.view': handleGetCoverArt,
   '/rest/getCoverArt': handleGetCoverArt,
+  '/rest/getLyrics.view': handleGetLyrics,
+  '/rest/getLyrics': handleGetLyrics,
   '/rest/getPlaylists.view': handleGetPlaylists,
   '/rest/getPlaylists': handleGetPlaylists,
   '/rest/getPlaylist.view': handleGetPlaylist,
