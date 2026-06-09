@@ -287,6 +287,62 @@ const handleGetPlaylist: Handler = async (_req, query) => {
   return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
 }
 
+// --- Single song ---
+
+const handleGetSong: Handler = async (_req, query) => {
+  const id = parseInt(query.get('id') || '0')
+  if (!id) {
+    const r = errorResponse(query, 10, 'Required parameter is missing: id')
+    return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+  }
+  const song = await songloft.songs.getById(id)
+  if (!song) {
+    const r = errorResponse(query, 70, 'Song not found')
+    return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+  }
+  const r = okResponse(query, { song: songToSubsonic(song) })
+  return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+}
+
+// --- Starred ---
+
+const handleGetStarred: Handler = async (_req, query) => {
+  // 返回空收藏（暂无 star 状态持久化）
+  const r = okResponse(query, { starred: { song: [], album: [], artist: [] } })
+  return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+}
+
+const handleGetStarred2: Handler = async (_req, query) => {
+  const r = okResponse(query, { starred2: { song: [], album: [], artist: [] } })
+  return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+}
+
+// --- Indexes ---
+
+const handleGetIndexes: Handler = async (_req, query) => {
+  const songs = await songloft.songs.list({ limit: 100000 })
+  const artistMap = new Map<string, number>()
+  for (const song of songs) {
+    const a = song.artist || 'Unknown'
+    artistMap.set(a, (artistMap.get(a) || 0) + 1)
+  }
+
+  const indexes: Record<string, any[]> = {}
+  for (const [name] of artistMap) {
+    const letter = (name[0] || '#').toUpperCase()
+    const key = /[A-Z]/.test(letter) ? letter : '#'
+    if (!indexes[key]) indexes[key] = []
+    indexes[key].push({ id: `ar-${name}`, name })
+  }
+
+  const indexArr = Object.entries(indexes)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, artists]) => ({ name, artist: artists }))
+
+  const r = okResponse(query, { indexes: { ignoredArticles: 'The El La', index: indexArr } })
+  return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+}
+
 // --- Random ---
 
 const handleGetRandomSongs: Handler = async (_req, query) => {
@@ -389,6 +445,14 @@ const routes: Record<string, Handler> = {
   '/rest/getRandomSongs': handleGetRandomSongs,
   '/rest/getGenres.view': handleGetGenres,
   '/rest/getGenres': handleGetGenres,
+  '/rest/getSong.view': handleGetSong,
+  '/rest/getSong': handleGetSong,
+  '/rest/getStarred.view': handleGetStarred,
+  '/rest/getStarred': handleGetStarred,
+  '/rest/getStarred2.view': handleGetStarred2,
+  '/rest/getStarred2': handleGetStarred2,
+  '/rest/getIndexes.view': handleGetIndexes,
+  '/rest/getIndexes': handleGetIndexes,
 }
 
 // --- Server config management (exposed via normal auth routes) ---
