@@ -521,5 +521,58 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // === 服务端模式 ===
+    async function loadServerConfig() {
+        try {
+            const res = await fetch('server/config', { headers: getAuthHeaders() })
+            if (res.ok) {
+                const data = await res.json()
+                document.getElementById('serverEnabled').checked = data.enabled
+                document.getElementById('serverUsername').value = data.username || ''
+            }
+        } catch {}
+        // 显示连接地址
+        const base = window.location.origin + window.location.pathname.replace(/\/static\/.*|\/+$/, '')
+        document.getElementById('serverUrl').textContent = base + '/rest'
+    }
+
+    document.getElementById('saveServerModeBtn').addEventListener('click', async () => {
+        const enabled = document.getElementById('serverEnabled').checked
+        const username = document.getElementById('serverUsername').value.trim()
+        const password = document.getElementById('serverPassword').value
+        if (enabled && !password && !username) {
+            showSnackbar('请设置用户名和密码')
+            return
+        }
+        const body = { enabled, username: username || 'admin' }
+        if (password) body.password = password
+        try {
+            const res = await fetch('server/config', {
+                method: 'PUT',
+                headers: getAuthHeaders(),
+                body: JSON.stringify(body)
+            })
+            if (res.ok) {
+                showSnackbar('服务端配置已保存')
+            } else {
+                showSnackbar('保存失败')
+            }
+        } catch (e) {
+            showSnackbar('保存失败: ' + e.message)
+        }
+    })
+
+    document.getElementById('serverUrl').addEventListener('click', () => {
+        const text = document.getElementById('serverUrl').textContent
+        navigator.clipboard.writeText(text).then(() => showSnackbar('已复制连接地址'))
+    })
+
+    // tab 切换时加载服务端配置
+    document.querySelectorAll('.tab-item').forEach(el => {
+        el.addEventListener('click', () => {
+            if (el.dataset.tab === 'server-mode') loadServerConfig()
+        })
+    })
+
     fetchServers()
 })

@@ -120,15 +120,72 @@
         </div>
     </div>
 
+    <!-- Tab 3: 服务端设置 -->
+    <div class="tab-content" id="tab-server-mode">
+        <div class="container">
+            <div class="card">
+                <div class="card-header">
+                    <span class="material-symbols-outlined">cloud_upload</span>
+                    Subsonic 服务端
+                </div>
+                <div class="card-body">
+                    <p style="font-size:13px;color:var(--md-on-surface-variant);margin:0 0 16px;">
+                        开启后，第三方客户端（Symfonium、DSub 等）可通过 Subsonic 协议访问本机音乐库。
+                    </p>
+                    <div class="form-group" style="display:flex;align-items:center;justify-content:space-between;">
+                        <label class="form-label" style="margin:0;">启用服务端</label>
+                        <label class="switch">
+                            <input type="checkbox" id="serverEnabled">
+                            <span class="switch-slider"></span>
+                        </label>
+                    </div>
+                    <div class="form-group" style="margin-top:16px">
+                        <label class="form-label">用户名</label>
+                        <input type="text" class="text-field" id="serverUsername" placeholder="admin">
+                    </div>
+                    <div class="form-group" style="margin-top:12px">
+                        <label class="form-label">密码</label>
+                        <input type="password" class="text-field" id="serverPassword" placeholder="设置连接密码">
+                    </div>
+                    <div class="toolbar" style="padding:16px 0 0;justify-content:flex-end;">
+                        <button class="btn-filled" id="saveServerModeBtn">
+                            <span class="material-symbols-outlined">save</span>
+                            保存
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="card" style="margin-top:16px">
+                <div class="card-header">
+                    <span class="material-symbols-outlined">link</span>
+                    连接信息
+                </div>
+                <div class="card-body">
+                    <p style="font-size:13px;color:var(--md-on-surface-variant);margin:0 0 8px;">
+                        在第三方客户端中填写以下地址：
+                    </p>
+                    <div class="text-field" id="serverUrl" style="font-size:12px;word-break:break-all;background:var(--md-surface-container);cursor:pointer;" title="点击复制"></div>
+                    <p style="font-size:12px;color:var(--md-on-surface-variant);margin:8px 0 0;">
+                        用户名和密码使用上方配置的值。
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Tab Bar -->
     <nav class="tab-bar">
         <button class="tab-item active" data-tab="servers">
             <span class="material-symbols-outlined">dns</span>
-            <span>服务器管理</span>
+            <span>音乐源</span>
         </button>
         <button class="tab-item" data-tab="browser">
             <span class="material-symbols-outlined">library_music</span>
             <span>音乐库</span>
+        </button>
+        <button class="tab-item" data-tab="server-mode">
+            <span class="material-symbols-outlined">cloud_upload</span>
+            <span>服务端</span>
         </button>
     </nav>
 
