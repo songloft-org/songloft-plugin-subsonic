@@ -1,6 +1,6 @@
 {
   "name": "subsonic",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "通过 Subsonic API 接入外部音乐库 (如 Navidrome)",
   "private": true,
   "scripts": {
