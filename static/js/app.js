@@ -60,13 +60,14 @@ function getFormData() {
         username: document.getElementById('subUsername').value.trim(),
         password: document.getElementById('subPassword').value.trim(),
         salt: document.getElementById('subSalt').value.trim(),
+        pathPrefix: document.getElementById('subPathPrefix').value,
     }
 }
 
 async function testServer() {
     const data = getFormData()
     if (!data.url || !data.username) { showSnackbar('地址和用户名不能为空'); return }
-    const payload = { name: data.name || 'test', url: data.url, username: data.username, version: '1.16.1' }
+    const payload = { name: data.name || 'test', url: data.url, username: data.username, version: '1.16.1', pathPrefix: data.pathPrefix }
     if (data.salt) { payload.token = data.password; payload.salt = data.salt } else { payload.password = data.password }
     try {
         const res = await fetch('./test', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(payload) })
@@ -80,7 +81,7 @@ async function testServer() {
 async function addServer() {
     const data = getFormData()
     if (!data.name || !data.url || !data.username) { showSnackbar('名称、地址和用户名不能为空'); return }
-    const payload = { name: data.name, url: data.url, username: data.username, version: '1.16.1' }
+    const payload = { name: data.name, url: data.url, username: data.username, version: '1.16.1', pathPrefix: data.pathPrefix }
     if (data.salt) { payload.token = data.password; payload.salt = data.salt } else { payload.password = data.password }
     try {
         const res = await fetch('./lists', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(payload) })
@@ -91,6 +92,7 @@ async function addServer() {
             document.getElementById('subUsername').value = ''
             document.getElementById('subPassword').value = ''
             document.getElementById('subSalt').value = ''
+            document.getElementById('subPathPrefix').value = '/rest'
             fetchServers()
         }
     } catch (e) { showSnackbar('保存失败: ' + e) }
@@ -112,6 +114,7 @@ function openEditDialog(name) {
     document.getElementById('editUsername').value = server.username || ''
     document.getElementById('editPassword').value = ''
     document.getElementById('editSalt').value = server.salt || ''
+    document.getElementById('editPathPrefix').value = server.pathPrefix !== undefined ? server.pathPrefix : '/rest'
     document.getElementById('editDialog').classList.add('show')
 }
 
@@ -124,9 +127,10 @@ async function saveEditServer() {
         username: document.getElementById('editUsername').value.trim(),
         password: document.getElementById('editPassword').value.trim(),
         salt: document.getElementById('editSalt').value.trim(),
+        pathPrefix: document.getElementById('editPathPrefix').value,
     }
     if (!data.url || !data.username) { showSnackbar('地址和用户名不能为空'); return }
-    const payload = { name: data.name, url: data.url, username: data.username, version: '1.16.1' }
+    const payload = { name: data.name, url: data.url, username: data.username, version: '1.16.1', pathPrefix: data.pathPrefix }
     if (data.salt) { payload.token = data.password; payload.salt = data.salt } else { payload.password = data.password }
     try {
         const res = await fetch('./lists', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(payload) })

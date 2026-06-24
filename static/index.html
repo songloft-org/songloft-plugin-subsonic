@@ -47,6 +47,11 @@
                         <label class="form-label">Salt (选填)</label>
                         <input type="text" class="text-field" id="subSalt" placeholder="如果使用 Token 认证，填写 Salt" aria-label="Salt">
                     </div>
+                    <div class="form-group" style="margin-top:12px">
+                        <label class="form-label">API 路径前缀</label>
+                        <input type="text" class="text-field" id="subPathPrefix" value="/rest" aria-label="API 路径前缀">
+                        <div style="font-size:12px;color:var(--md-on-surface-variant);margin-top:4px;">标准 Subsonic 服务器保持 /rest；LX Music 等非标准服务器需清空此项</div>
+                    </div>
                     <div class="toolbar" style="padding:16px 0 0;justify-content:flex-end;gap:8px">
                         <button class="btn-text" id="testServerBtn">
                             <span class="material-symbols-outlined">network_check</span>
@@ -235,6 +240,11 @@
                 <div class="form-group" style="margin-top:12px">
                     <label class="form-label">Salt (选填)</label>
                     <input type="text" class="text-field" id="editSalt" aria-label="Salt">
+                </div>
+                <div class="form-group" style="margin-top:12px">
+                    <label class="form-label">API 路径前缀</label>
+                    <input type="text" class="text-field" id="editPathPrefix" value="/rest" aria-label="API 路径前缀">
+                    <div style="font-size:12px;color:var(--md-on-surface-variant);margin-top:4px;">标准 Subsonic 服务器保持 /rest；LX Music 等非标准服务器需清空此项</div>
                 </div>
             </div>
             <div class="dialog-actions">

@@ -25,7 +25,8 @@ router.get('/lists', async (req: HTTPRequest) => {
     name: c.name,
     url: c.url,
     username: c.username,
-    salt: c.salt
+    salt: c.salt,
+    pathPrefix: c.pathPrefix
   })))
 })
 
