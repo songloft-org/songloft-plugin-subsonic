@@ -209,7 +209,7 @@ function renderItems(items, title) {
     if (isSelectMode) {
         const selectAllDiv = document.createElement('div')
         selectAllDiv.style.cssText = 'display:flex;align-items:center;padding:12px 0;border-bottom:1px solid var(--md-outline-variant);cursor:pointer;gap:12px;'
-        const allSelected = items.every(item => item.type !== 'directory' && selectedItems.has(item.id))
+        const allSelected = items.every(item => item.type !== 'file' || selectedItems.has(item.id))
         selectAllDiv.innerHTML = `
             <input type="checkbox" class="checkbox-custom" ${allSelected ? 'checked' : ''} style="pointer-events:none">
             <span style="font-weight:500;font-size:14px;color:var(--md-primary)">全选本页歌曲</span>
@@ -217,7 +217,7 @@ function renderItems(items, title) {
         selectAllDiv.onclick = () => {
             const willSelect = !allSelected
             items.forEach(item => {
-                if (item.type !== 'directory') {
+                if (item.type === 'file') {
                     if (willSelect) selectedItems.set(item.id, item)
                     else selectedItems.delete(item.id)
                 }
@@ -235,13 +235,13 @@ function renderItems(items, title) {
         
         const isSelected = selectedItems.has(item.id)
         
-        const icon = item.type === 'directory' ? 'folder_special' : 'music_note'
-        const color = item.type === 'directory' ? 'var(--md-primary)' : 'var(--md-on-surface)'
-        const subtitle = item.type === 'directory' ? 'Artist/Album' : (item.artist ? item.artist + ' - ' : '') + (item.album || '')
+        const icon = item.type === 'directory' ? 'folder_special' : item.type === 'playlist' ? 'queue_music' : 'music_note'
+        const color = (item.type === 'directory' || item.type === 'playlist') ? 'var(--md-primary)' : 'var(--md-on-surface)'
+        const subtitle = item.type === 'directory' ? 'Artist/Album' : item.type === 'playlist' ? `${item.songCount || 0} 首歌曲` : (item.artist ? item.artist + ' - ' : '') + (item.album || '')
         
         // Front section (Icon or Checkbox)
         let leadingHtml = ''
-        if (isSelectMode && item.type !== 'directory') {
+        if (isSelectMode && item.type === 'file') {
             leadingHtml = `<input type="checkbox" class="checkbox-custom" ${isSelected ? 'checked' : ''} style="pointer-events:none;margin-right:12px;">`
         } else {
             leadingHtml = `<span class="material-symbols-outlined" style="color:${color};margin-right:12px">${icon}</span>`
@@ -249,7 +249,7 @@ function renderItems(items, title) {
 
         // Trailing section (Import button)
         let trailingHtml = ''
-        if (item.type !== 'directory') {
+        if (item.type === 'file') {
             trailingHtml = `<button class="btn-icon" title="导入此曲" style="color:var(--md-primary);" onclick="event.stopPropagation(); window._importSingle('${item.id}')"><span class="material-symbols-outlined">add_circle</span></button>`
         }
 
@@ -267,6 +267,9 @@ function renderItems(items, title) {
                 const serverName = document.getElementById('browserServerSelect').value
                 pathStack.push(item.id)
                 loadDirectory(serverName, item.id)
+            } else if (item.type === 'playlist') {
+                const serverName = document.getElementById('browserServerSelect').value
+                loadPlaylistSongs(serverName, item.id, item.name)
             } else {
                 if (isSelectMode) {
                     if (isSelected) selectedItems.delete(item.id)
@@ -345,6 +348,43 @@ async function searchSongsList() {
         renderItems(items, `搜索结果: ${keyword}`)
     } catch (e) {
         container.innerHTML = `<div class="empty-state" style="color:var(--md-error)">搜索失败: ${e}</div>`
+    }
+}
+
+async function fetchPlaylists() {
+    const serverName = document.getElementById('browserServerSelect').value
+    if (!serverName) return
+
+    pathStack = ['root', 'playlists']
+    document.getElementById('browserUpBtn').style.display = 'block'
+    const container = document.getElementById('browserList')
+    container.innerHTML = '<div class="empty-state">加载中...</div>'
+
+    try {
+        const res = await fetch(`./lists/${encodeURIComponent(serverName)}/playlists`, { headers: getAuthHeaders() })
+        if (!res.ok) throw new Error(await res.text())
+        const items = await res.json()
+        currentPathId = 'playlists'
+        renderItems(items, '歌单列表')
+    } catch (e) {
+        container.innerHTML = `<div class="empty-state" style="color:var(--md-error)">加载失败: ${e}</div>`
+    }
+}
+
+async function loadPlaylistSongs(serverName, playlistId, playlistName) {
+    const container = document.getElementById('browserList')
+    container.innerHTML = '<div class="empty-state">加载中...</div>'
+    document.getElementById('browserUpBtn').style.display = 'block'
+    pathStack.push(playlistId)
+
+    try {
+        const res = await fetch(`./lists/${encodeURIComponent(serverName)}/playlists/${encodeURIComponent(playlistId)}`, { headers: getAuthHeaders() })
+        if (!res.ok) throw new Error(await res.text())
+        const items = await res.json()
+        currentPathId = `playlist_${playlistId}`
+        renderItems(items, playlistName)
+    } catch (e) {
+        container.innerHTML = `<div class="empty-state" style="color:var(--md-error)">加载失败: ${e}</div>`
     }
 }
 
@@ -446,9 +486,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('browserUpBtn').onclick = () => {
         const server = document.getElementById('browserServerSelect').value
         if (!server || pathStack.length <= 1) return
-        pathStack.pop() // remove current
+        pathStack.pop()
         const parentId = pathStack[pathStack.length - 1]
-        loadDirectory(server, parentId)
+        if (parentId === 'playlists') {
+            fetchPlaylists()
+        } else {
+            loadDirectory(server, parentId)
+        }
     }
 
     // Discovery UI
@@ -456,6 +500,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('searchInput').onkeydown = (e) => {
         if (e.key === 'Enter') searchSongsList()
     }
+    document.getElementById('chipPlaylists').onclick = () => fetchPlaylists()
     document.getElementById('chipStarred').onclick = () => fetchSpecialList('starred', '我的收藏')
     document.getElementById('chipRandom').onclick = () => fetchSpecialList('random', '随便听听')
     
