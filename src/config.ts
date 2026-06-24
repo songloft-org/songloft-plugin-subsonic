@@ -8,6 +8,7 @@ export interface SubsonicConfig {
   salt?: string
   name: string
   version?: string // e.g. 1.16.1
+  pathPrefix?: string // API 路径前缀，默认 "/rest"，部分服务器（如 LX Music Sync Server）需设为空
 }
 
 const CONFIG_KEY = 'subsonic_configs'

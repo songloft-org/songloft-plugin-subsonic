@@ -1,7 +1,7 @@
 import { createRouter, jsonResponse, createSearchHandler, createMusicUrlHandler } from '@songloft/plugin-sdk'
 import type { HTTPRequest, SearchResultItem } from '@songloft/plugin-sdk'
 import { getConfigs, saveConfigs, getConfig, SubsonicConfig } from './config'
-import { ping, getIndexes, getMusicDirectory, getStreamUrl, searchSongs, getStarred, getRandomSongs, getLyrics } from './client'
+import { ping, getIndexes, getMusicDirectory, getStreamUrl, searchSongs, getStarred, getRandomSongs, getLyrics, getPlaylists, getPlaylist } from './client'
 
 function parseBody(req: HTTPRequest): any {
   if (!req.body) return {}
@@ -332,6 +332,50 @@ router.get('/lists/:id/random', async (req: HTTPRequest, params) => {
     return jsonResponse(songs.map((item: any) => ({
       id: item.id,
       name: item.title,
+      type: 'file',
+      artist: item.artist,
+      album: item.album,
+      duration: item.duration,
+      size: item.size,
+      streamUrl: getStreamUrl(config, item.id),
+      coverArt: item.coverArt ? getStreamUrl(config, item.coverArt).replace('stream', 'getCoverArt') : undefined,
+      lyric: `/api/plugin/songloft-plugin-subsonic/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`,
+      lyric_source: 'url',
+      lyricUrl: `/api/plugin/songloft-plugin-subsonic/lists/${encodeURIComponent(config.name)}/lyric?artist=${encodeURIComponent(item.artist || '')}&title=${encodeURIComponent(item.title || item.name || '')}`
+    })))
+  } catch (e) {
+    return jsonResponse({ error: String(e) }, 500)
+  }
+})
+
+// 歌单列表
+router.get('/lists/:id/playlists', async (req: HTTPRequest, params) => {
+  const config = await getConfig(params.id)
+  if (!config) return jsonResponse({ error: 'Config not found' }, 404)
+
+  try {
+    const playlists = await getPlaylists(config)
+    return jsonResponse(playlists.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      songCount: p.songCount || 0,
+      type: 'playlist',
+    })))
+  } catch (e) {
+    return jsonResponse({ error: String(e) }, 500)
+  }
+})
+
+// 歌单详情（列出歌曲）
+router.get('/lists/:id/playlists/:plId', async (req: HTTPRequest, params) => {
+  const config = await getConfig(params.id)
+  if (!config) return jsonResponse({ error: 'Config not found' }, 404)
+
+  try {
+    const songs = await getPlaylist(config, params.plId)
+    return jsonResponse(songs.map((item: any) => ({
+      id: item.id,
+      name: item.title || item.name,
       type: 'file',
       artist: item.artist,
       album: item.album,

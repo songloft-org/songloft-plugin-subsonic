@@ -11,29 +11,30 @@ function md5(str: string): string {
 function buildUrl(config: SubsonicConfig, endpoint: string, params: Record<string, string> = {}): string {
   const url = config.url.replace(/\/$/, '')
   const qs: string[] = []
-  
+
   qs.push(`u=${encodeURIComponent(config.username)}`)
-  
+
   if (config.token && config.salt) {
     qs.push(`t=${encodeURIComponent(config.token)}`)
     qs.push(`s=${encodeURIComponent(config.salt)}`)
   } else if (config.password) {
-    // 强制丢弃 p=enc: 模式，自动静默升级为 MD5 Token 模式以防日志泄露密码
     const salt = Math.random().toString(36).substring(2, 10)
     const token = md5(config.password + salt)
     qs.push(`t=${encodeURIComponent(token)}`)
     qs.push(`s=${encodeURIComponent(salt)}`)
   }
-  
+
   qs.push(`v=${encodeURIComponent(config.version || '1.16.1')}`)
   qs.push(`c=songloft`)
   qs.push(`f=json`)
-  
+
   for (const [k, v] of Object.entries(params)) {
     qs.push(`${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
   }
-  
-  return `${url}/rest/${endpoint}?${qs.join('&')}`
+
+  const prefix = config.pathPrefix !== undefined ? config.pathPrefix : '/rest'
+  const sep = prefix && !prefix.endsWith('/') ? '/' : ''
+  return `${url}${prefix}${sep}${endpoint}?${qs.join('&')}`
 }
 
 export async function ping(config: SubsonicConfig): Promise<boolean> {
@@ -52,44 +53,8 @@ export async function ping(config: SubsonicConfig): Promise<boolean> {
   return true
 }
 
-export async function getIndexes(config: SubsonicConfig): Promise<any[]> {
-  let res = await fetch(buildUrl(config, 'getIndexes'))
-  let data;
-  let useFallback = false;
-
-  if (res.ok) {
-    data = await res.json()
-    if (data['subsonic-response']?.status !== 'ok') {
-      useFallback = true;
-    }
-  } else {
-    useFallback = true;
-  }
-
-  if (useFallback) {
-    res = await fetch(buildUrl(config, 'getArtists'))
-    if (!res.ok) throw new Error('Failed to get indexes or artists')
-    data = await res.json()
-    if (data['subsonic-response']?.status !== 'ok') {
-      throw new Error('API Error: ' + JSON.stringify(data))
-    }
-    
-    const indexes = data['subsonic-response'].artists?.index || []
-    const artists: any[] = []
-    
-    for (const idx of indexes) {
-      if (idx.artist && Array.isArray(idx.artist)) {
-        artists.push(...idx.artist)
-      } else if (idx.artist) {
-        artists.push(idx.artist)
-      }
-    }
-    return artists
-  }
-  
-  const indexes = data['subsonic-response'].indexes?.index || []
+function collectArtists(indexes: any[]): any[] {
   const artists: any[] = []
-  
   for (const idx of indexes) {
     if (idx.artist && Array.isArray(idx.artist)) {
       artists.push(...idx.artist)
@@ -97,36 +62,50 @@ export async function getIndexes(config: SubsonicConfig): Promise<any[]> {
       artists.push(idx.artist)
     }
   }
-  
   return artists
 }
 
-export async function getMusicDirectory(config: SubsonicConfig, id: string): Promise<any[]> {
-  let res = await fetch(buildUrl(config, 'getMusicDirectory', { id }))
-  let data;
-  let useFallback = false;
-
-  if (res.ok) {
-    data = await res.json()
-    if (data['subsonic-response']?.status !== 'ok') {
-      useFallback = true;
-    } else {
-      const dir = data['subsonic-response'].directory
-      if (dir && dir.child) {
-        return Array.isArray(dir.child) ? dir.child : [dir.child]
+export async function getIndexes(config: SubsonicConfig): Promise<any[]> {
+  try {
+    const res = await fetch(buildUrl(config, 'getIndexes'))
+    if (res.ok) {
+      const data = await res.json()
+      if (data['subsonic-response']?.status === 'ok') {
+        return collectArtists(data['subsonic-response'].indexes?.index || [])
       }
-      return []
     }
-  } else {
-    useFallback = true;
-  }
+  } catch { /* fallback to getArtists */ }
 
-  if (useFallback) {
-    let fallbackRes = await fetch(buildUrl(config, 'getArtist', { id }))
-    if (fallbackRes.ok) {
-      let fallbackData = await fallbackRes.json()
-      if (fallbackData['subsonic-response']?.status === 'ok' && fallbackData['subsonic-response'].artist) {
-        const artist = fallbackData['subsonic-response'].artist
+  const res = await fetch(buildUrl(config, 'getArtists'))
+  if (!res.ok) throw new Error('Failed to get indexes or artists')
+  const data = await res.json()
+  if (data['subsonic-response']?.status !== 'ok') {
+    throw new Error('API Error: ' + JSON.stringify(data))
+  }
+  return collectArtists(data['subsonic-response'].artists?.index || [])
+}
+
+export async function getMusicDirectory(config: SubsonicConfig, id: string): Promise<any[]> {
+  try {
+    const res = await fetch(buildUrl(config, 'getMusicDirectory', { id }))
+    if (res.ok) {
+      const data = await res.json()
+      if (data['subsonic-response']?.status === 'ok') {
+        const dir = data['subsonic-response'].directory
+        if (dir && dir.child) {
+          return Array.isArray(dir.child) ? dir.child : [dir.child]
+        }
+        return []
+      }
+    }
+  } catch { /* fallback to getArtist/getAlbum */ }
+
+  try {
+    const res = await fetch(buildUrl(config, 'getArtist', { id }))
+    if (res.ok) {
+      const data = await res.json()
+      if (data['subsonic-response']?.status === 'ok' && data['subsonic-response'].artist) {
+        const artist = data['subsonic-response'].artist
         if (artist && artist.album) {
           const albums = Array.isArray(artist.album) ? artist.album : [artist.album]
           return albums.map(a => ({ ...a, isDir: true }))
@@ -134,12 +113,14 @@ export async function getMusicDirectory(config: SubsonicConfig, id: string): Pro
         return []
       }
     }
+  } catch { /* fallback to getAlbum */ }
 
-    fallbackRes = await fetch(buildUrl(config, 'getAlbum', { id }))
-    if (fallbackRes.ok) {
-      let fallbackData = await fallbackRes.json()
-      if (fallbackData['subsonic-response']?.status === 'ok' && fallbackData['subsonic-response'].album) {
-        const album = fallbackData['subsonic-response'].album
+  try {
+    const res = await fetch(buildUrl(config, 'getAlbum', { id }))
+    if (res.ok) {
+      const data = await res.json()
+      if (data['subsonic-response']?.status === 'ok' && data['subsonic-response'].album) {
+        const album = data['subsonic-response'].album
         if (album && album.song) {
           const songs = Array.isArray(album.song) ? album.song : [album.song]
           return songs.map(s => ({ ...s, isDir: false }))
@@ -147,14 +128,9 @@ export async function getMusicDirectory(config: SubsonicConfig, id: string): Pro
         return []
       }
     }
+  } catch { /* all fallbacks failed */ }
 
-    if (data && data['subsonic-response']?.status !== 'ok') {
-      throw new Error('API Error: ' + JSON.stringify(data))
-    }
-    throw new Error('Failed to get directory')
-  }
-
-  return []
+  throw new Error('Failed to get directory')
 }
 
 export function getStreamUrl(config: SubsonicConfig, id: string): string {
@@ -209,5 +185,29 @@ export async function getLyrics(config: SubsonicConfig, artist: string, title: s
   }
   const lyricValue = data['subsonic-response']?.lyrics?.value
   return lyricValue || ''
+}
+
+export async function getPlaylists(config: SubsonicConfig): Promise<any[]> {
+  const res = await fetch(buildUrl(config, 'getPlaylists'))
+  if (!res.ok) throw new Error('Failed to get playlists')
+  const data = await res.json()
+  if (data['subsonic-response']?.status !== 'ok') {
+    throw new Error('API Error: ' + JSON.stringify(data))
+  }
+  const playlists = data['subsonic-response'].playlists?.playlist || []
+  return Array.isArray(playlists) ? playlists : [playlists]
+}
+
+export async function getPlaylist(config: SubsonicConfig, id: string): Promise<any[]> {
+  const res = await fetch(buildUrl(config, 'getPlaylist', { id }))
+  if (!res.ok) throw new Error('Failed to get playlist')
+  const data = await res.json()
+  if (data['subsonic-response']?.status !== 'ok') {
+    throw new Error('API Error: ' + JSON.stringify(data))
+  }
+  const playlist = data['subsonic-response'].playlist
+  if (!playlist) return []
+  const entries = playlist.entry || playlist.song || []
+  return Array.isArray(entries) ? entries : [entries]
 }
 
