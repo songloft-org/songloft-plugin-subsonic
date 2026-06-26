@@ -341,7 +341,23 @@ const handleStream: Handler = async (_req, query) => {
     const r = errorResponse(query, 10, 'Invalid id')
     return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
   }
-  return { serveFile: { songId } }
+
+  const song = await songloft.songs.getById(songId)
+  if (!song) {
+    const r = errorResponse(query, 70, 'Song not found')
+    return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+  }
+
+  if (song.type === 'local') {
+    return { serveFile: { songId } }
+  }
+
+  const token = await songloft.plugin.getToken()
+  return {
+    statusCode: 302,
+    headers: { 'Location': `${song.url}?access_token=${token}` },
+    body: ''
+  }
 }
 
 const handleGetCoverArt: Handler = async (_req, query) => {
@@ -710,10 +726,11 @@ const handleGetSongsByGenre: Handler = async (_req, query) => {
 const handleGetInternetRadioStations: Handler = async (_req, query) => {
   try {
     const songs = await songloft.playlists.getSongs(2, { limit: 10000 })
+    const token = await songloft.plugin.getToken()
     const stations = songs.map((s: any) => ({
       id: String(s.id),
       name: s.title || '',
-      streamUrl: s.url || '',
+      streamUrl: s.url ? `${s.url}?access_token=${token}` : '',
       homePageUrl: '',
     }))
     const r = okResponse(query, { internetRadioStations: { internetRadioStation: stations } })
