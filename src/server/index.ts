@@ -722,7 +722,7 @@ const handleGetSongsByGenre: Handler = async (_req, query) => {
 
 const handleGetInternetRadioStations: Handler = async (_req, query) => {
   try {
-    const songs = await songloft.playlists.getSongs(2, { limit: 10000 })
+    const songs = await songloft.songs.list({ type: 'radio', limit: 10000 })
     const stations = songs.map((s: any) => ({
       id: String(s.id),
       name: s.title || '',
@@ -793,7 +793,7 @@ const handleGetTopSongs: Handler = async (_req, query) => {
 
 function songToSubsonic(s: any) {
   const fp = s.file_path || s.filePath || ''
-  const suffix = fp.split('.').pop() || 'mp3'
+  const suffix = s.format || fp.split('.').pop() || 'mp3'
   const mimeMap: Record<string, string> = {
     mp3: 'audio/mpeg', flac: 'audio/flac', m4a: 'audio/mp4',
     ogg: 'audio/ogg', wav: 'audio/wav', wma: 'audio/x-ms-wma', aac: 'audio/aac',
