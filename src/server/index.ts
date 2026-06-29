@@ -348,16 +348,7 @@ const handleStream: Handler = async (_req, query) => {
     return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
   }
 
-  if (song.type === 'local') {
-    return { serveFile: { songId } }
-  }
-
-  const token = await songloft.plugin.getToken()
-  return {
-    statusCode: 302,
-    headers: { 'Location': `${song.url}?access_token=${token}` },
-    body: ''
-  }
+  return { serveFile: { songId } }
 }
 
 const handleGetCoverArt: Handler = async (_req, query) => {
@@ -662,6 +653,12 @@ const handleGetIndexes: Handler = async (_req, query) => {
 
 // --- Random ---
 
+const handleGetScanStatus: Handler = async (_req, query) => {
+  const songs = await songloft.songs.list({ limit: 100000 })
+  const r = okResponse(query, { scanStatus: { scanning: 'false', count: songs.length } })
+  return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+}
+
 const handleGetRandomSongs: Handler = async (_req, query) => {
   const size = Math.min(parseInt(query.get('size') || '10'), 500)
   const genre = query.get('genre') || ''
@@ -726,11 +723,10 @@ const handleGetSongsByGenre: Handler = async (_req, query) => {
 const handleGetInternetRadioStations: Handler = async (_req, query) => {
   try {
     const songs = await songloft.playlists.getSongs(2, { limit: 10000 })
-    const token = await songloft.plugin.getToken()
     const stations = songs.map((s: any) => ({
       id: String(s.id),
       name: s.title || '',
-      streamUrl: s.url ? `${s.url}?access_token=${token}` : '',
+      streamUrl: s.source_url || '',
       homePageUrl: '',
     }))
     const r = okResponse(query, { internetRadioStations: { internetRadioStation: stations } })
@@ -835,6 +831,10 @@ const routes: Record<string, Handler> = {
   '/rest/getLicense': handlePing,
   '/rest/getUser.view': handleGetUser,
   '/rest/getUser': handleGetUser,
+
+  // Scan Status
+  '/rest/getScanStatus.view': handleGetScanStatus,
+  '/rest/getScanStatus': handleGetScanStatus,
 
   // Browsing
   '/rest/getMusicFolders.view': handleGetMusicFolders,
@@ -954,6 +954,19 @@ const handleSetServerConfig: Handler = async (req, _query) => {
 export async function handleServerRoute(req: HTTPRequest): Promise<HTTPResponse | null> {
   const path = req.path
   const query = new URLSearchParams(req.query)
+
+  // Subsonic API: 参数可通过 URL query 或 POST body (form-encoded) 传递
+  if (req.body) {
+    const bodyStr = typeof req.body === 'string'
+      ? req.body
+      : String.fromCharCode.apply(null, Array.from(req.body as Uint8Array))
+    if (bodyStr && !bodyStr.startsWith('{') && !bodyStr.startsWith('[')) {
+      const bodyParams = new URLSearchParams(bodyStr)
+      for (const [key, value] of bodyParams.entries()) {
+        query.append(key, value)
+      }
+    }
+  }
 
   // 服务端配置管理（走正常 JWT 认证路由）
   if (path === '/server/config') {
