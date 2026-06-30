@@ -122,7 +122,7 @@ router.post('/api/search', createSearchHandler({
     const configs = await getConfigs()
     if (configs.length === 0) return []
 
-    const results: SearchResultItem[] = []
+    const results: (SearchResultItem & Record<string, unknown>)[] = []
 
     // 并发搜索所有配置的服务器
     await Promise.all(configs.map(async (config) => {
@@ -142,8 +142,7 @@ router.post('/api/search', createSearchHandler({
           })
         }
       } catch (e) {
-        // 忽略单个服务器错误，但打印日志方便排查
-        console.error('Subsonic search error for ' + config.name + ':', String(e))
+        songloft.log.error('Subsonic search error for ' + config.name + ': ' + String(e))
       }
     }))
 

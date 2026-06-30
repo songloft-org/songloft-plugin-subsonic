@@ -9,7 +9,7 @@ export interface ServerConfig {
 export async function getServerConfig(): Promise<ServerConfig> {
   try {
     const val = await songloft.storage.get(SERVER_CONFIG_KEY)
-    if (val) return JSON.parse(val) as ServerConfig
+    if (val) return JSON.parse(val as string) as ServerConfig
   } catch {}
   return { enabled: false, username: 'admin', password: '' }
 }

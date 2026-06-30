@@ -366,13 +366,44 @@ const handleGetCoverArt: Handler = async (_req, query) => {
 
   const numId = parseInt(id.replace(/^(al|ar)-/, ''))
   if (isNaN(numId)) {
-    return { statusCode: 404, headers: {}, body: '' }
+    return { statusCode: 404, headers: {} as Record<string, string>, body: '' }
   }
   return {
     statusCode: 302,
-    headers: { 'Location': `/api/v1/songs/${numId}/cover?access_token=${token}` },
+    headers: { 'Location': `/api/v1/songs/${numId}/cover?access_token=${token}` } as Record<string, string>,
     body: ''
   }
+}
+
+function parseLRC(lrc: string): { synced: boolean; line: { start?: number; value: string }[] } {
+  if (!lrc) return { synced: false, line: [] }
+  const timeTagRe = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/
+  const lines: { start?: number; value: string }[] = []
+  let hasTags = false
+  for (const raw of lrc.split('\n')) {
+    const trimmed = raw.trim()
+    if (!trimmed) continue
+    const m = trimmed.match(timeTagRe)
+    if (m) {
+      hasTags = true
+      const ms = parseInt(m[1]) * 60000 + parseInt(m[2]) * 1000 + parseInt(m[3].padEnd(3, '0'))
+      const text = trimmed.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').trim()
+      if (text) lines.push({ start: ms, value: text })
+    } else if (!trimmed.startsWith('[')) {
+      lines.push({ value: trimmed })
+    }
+  }
+  return { synced: hasTags && lines.every(l => l.start !== undefined), line: lines }
+}
+
+async function fetchLyricPayload(songId: number): Promise<any | null> {
+  try {
+    const token = await songloft.plugin.getToken()
+    const hostUrl = await songloft.plugin.getHostUrl()
+    const resp = await fetch(`${hostUrl}/api/v1/songs/${songId}/lyric?access_token=${token}`)
+    if (resp.ok) return await resp.json()
+  } catch {}
+  return null
 }
 
 const handleGetLyrics: Handler = async (_req, query) => {
@@ -382,9 +413,13 @@ const handleGetLyrics: Handler = async (_req, query) => {
   let songId = 0
   if (title) {
     const songs = await songloft.songs.search(title)
-    const match = songs.find((s: any) =>
-      s.title === title || (artist && s.artist === artist && s.title === title)
-    )
+    let exactMatch: any = null
+    let titleOnly: any = null
+    for (const s of songs) {
+      if (artist && s.artist === artist && s.title === title) { exactMatch = s; break }
+      if (!titleOnly && s.title === title) titleOnly = s
+    }
+    const match = exactMatch || titleOnly
     if (match) songId = match.id
   }
 
@@ -393,20 +428,56 @@ const handleGetLyrics: Handler = async (_req, query) => {
     return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
   }
 
-  try {
-    const token = await songloft.plugin.getToken()
-    const hostUrl = await songloft.plugin.getHostUrl()
-    const resp = await fetch(`${hostUrl}/api/v1/songs/${songId}/lyric?access_token=${token}`)
-    if (resp.ok) {
-      const data = await resp.json() as any
-      const lyric = data.lyric || ''
-      const plainText = lyric.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').replace(/\[.*?\]\r?\n?/g, '').trim()
-      const r = okResponse(query, { lyrics: { artist, title, value: plainText } })
-      return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
-    }
-  } catch {}
+  const data = await fetchLyricPayload(songId)
+  if (data) {
+    const lyric = data.lyric || ''
+    const plainText = lyric.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').replace(/\[.*?\]\r?\n?/g, '').trim()
+    const r = okResponse(query, { lyrics: { artist, title, value: plainText } })
+    return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+  }
 
   const r = okResponse(query, { lyrics: { artist, title } })
+  return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+}
+
+const handleGetLyricsBySongId: Handler = async (_req, query) => {
+  const id = parseInt(query.get('id') || '0')
+  if (!id) {
+    const r = errorResponse(query, 10, 'Required parameter is missing: id')
+    return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+  }
+
+  const song = await songloft.songs.getById(id)
+  if (!song) {
+    const r = errorResponse(query, 70, 'Song not found')
+    return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+  }
+
+  const data = await fetchLyricPayload(id)
+  if (!data || !data.lyric) {
+    const r = okResponse(query, { lyricsList: {} })
+    return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
+  }
+
+  const structuredLyrics: any[] = []
+  const main = parseLRC(data.lyric)
+  if (main.line.length > 0) {
+    structuredLyrics.push({
+      lang: 'und',
+      synced: main.synced,
+      line: main.line,
+      ...(song.artist ? { displayArtist: song.artist } : {}),
+      ...(song.title ? { displayTitle: song.title } : {}),
+    })
+  }
+  if (data.tlyric) {
+    const tl = parseLRC(data.tlyric)
+    if (tl.line.length > 0) {
+      structuredLyrics.push({ lang: 'translation', synced: tl.synced, line: tl.line })
+    }
+  }
+
+  const r = okResponse(query, { lyricsList: structuredLyrics.length > 0 ? { structuredLyrics } : {} })
   return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
 }
 
@@ -468,18 +539,19 @@ const handleCreatePlaylist: Handler = async (_req, query) => {
   const name = query.get('name') || ''
   const songIds = query.getAll('songId').map(id => parseInt(id)).filter(id => !isNaN(id))
 
+  const plApi = songloft.playlists as any
   if (playlistId) {
     const id = parseInt(playlistId)
     if (name) {
-      await songloft.playlists.update(id, { name })
+      await plApi.update(id, { name })
     }
     if (songIds.length > 0) {
-      await songloft.playlists.addSongs(id, songIds)
+      await plApi.addSongs(id, songIds)
     }
   } else if (name) {
-    const pl: any = await songloft.playlists.create({ name, type: 'normal' })
+    const pl: any = await plApi.create({ name, type: 'normal' })
     if (pl && songIds.length > 0) {
-      await songloft.playlists.addSongs(pl.id, songIds)
+      await plApi.addSongs(pl.id, songIds)
     }
   }
 
@@ -494,14 +566,15 @@ const handleUpdatePlaylist: Handler = async (_req, query) => {
     return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
   }
 
+  const plApi = songloft.playlists as any
   const name = query.get('name')
   if (name) {
-    await songloft.playlists.update(id, { name })
+    await plApi.update(id, { name })
   }
 
   const addIds = query.getAll('songIdToAdd').map(s => parseInt(s)).filter(n => !isNaN(n))
   if (addIds.length > 0) {
-    await songloft.playlists.addSongs(id, addIds)
+    await plApi.addSongs(id, addIds)
   }
 
   const removeIndices = query.getAll('songIndexToRemove').map(s => parseInt(s)).filter(n => !isNaN(n))
@@ -511,7 +584,7 @@ const handleUpdatePlaylist: Handler = async (_req, query) => {
       .filter(idx => idx >= 0 && idx < songs.length)
       .map(idx => (songs[idx] as any).id)
     if (removeIds.length > 0) {
-      await songloft.playlists.removeSongs(id, removeIds)
+      await plApi.removeSongs(id, removeIds)
     }
   }
 
@@ -525,7 +598,7 @@ const handleDeletePlaylist: Handler = async (_req, query) => {
     const r = errorResponse(query, 10, 'Required parameter is missing: id')
     return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
   }
-  await songloft.playlists.delete(id)
+  await (songloft.playlists as any).delete(id)
   const r = okResponse(query)
   return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
 }
@@ -536,9 +609,10 @@ const handleStar: Handler = async (_req, query) => {
   const ids = query.getAll('id').map(id => parseInt(id)).filter(id => !isNaN(id))
   const albumIds = query.getAll('albumId')
 
+  const plApi = songloft.playlists as any
   // Star songs by ID
   if (ids.length > 0) {
-    await songloft.playlists.addSongs(1, ids)
+    await plApi.addSongs(1, ids)
   }
 
   // Star all songs in album
@@ -551,7 +625,7 @@ const handleStar: Handler = async (_req, query) => {
       const albumName = seedSong.album || 'Unknown'
       const allSongs = await songloft.songs.list({ limit: 100000 })
       const albumSongIds = allSongs.filter(s => (s.album || 'Unknown') === albumName).map(s => s.id)
-      if (albumSongIds.length > 0) await songloft.playlists.addSongs(1, albumSongIds)
+      if (albumSongIds.length > 0) await plApi.addSongs(1, albumSongIds)
     }
   }
 
@@ -563,8 +637,9 @@ const handleUnstar: Handler = async (_req, query) => {
   const ids = query.getAll('id').map(id => parseInt(id)).filter(id => !isNaN(id))
   const albumIds = query.getAll('albumId')
 
+  const plApi = songloft.playlists as any
   if (ids.length > 0) {
-    await songloft.playlists.removeSongs(1, ids)
+    await plApi.removeSongs(1, ids)
   }
 
   if (albumIds.length > 0) {
@@ -576,7 +651,7 @@ const handleUnstar: Handler = async (_req, query) => {
       const albumName = seedSong.album || 'Unknown'
       const allSongs = await songloft.songs.list({ limit: 100000 })
       const albumSongIds = allSongs.filter(s => (s.album || 'Unknown') === albumName).map(s => s.id)
-      if (albumSongIds.length > 0) await songloft.playlists.removeSongs(1, albumSongIds)
+      if (albumSongIds.length > 0) await plApi.removeSongs(1, albumSongIds)
     }
   }
 
@@ -722,7 +797,7 @@ const handleGetSongsByGenre: Handler = async (_req, query) => {
 
 const handleGetInternetRadioStations: Handler = async (_req, query) => {
   try {
-    const songs = await songloft.songs.list({ type: 'radio', limit: 10000 })
+    const songs = await (songloft.songs as any).list({ type: 'radio', limit: 10000 })
     const stations = songs.map((s: any) => ({
       id: String(s.id),
       name: s.title || '',
@@ -877,6 +952,8 @@ const routes: Record<string, Handler> = {
   '/rest/getCoverArt': handleGetCoverArt,
   '/rest/getLyrics.view': handleGetLyrics,
   '/rest/getLyrics': handleGetLyrics,
+  '/rest/getLyricsBySongId.view': handleGetLyricsBySongId,
+  '/rest/getLyricsBySongId': handleGetLyricsBySongId,
 
   // Playlists
   '/rest/getPlaylists.view': handleGetPlaylists,

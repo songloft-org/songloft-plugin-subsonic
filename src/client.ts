@@ -108,7 +108,7 @@ export async function getMusicDirectory(config: SubsonicConfig, id: string): Pro
         const artist = data['subsonic-response'].artist
         if (artist && artist.album) {
           const albums = Array.isArray(artist.album) ? artist.album : [artist.album]
-          return albums.map(a => ({ ...a, isDir: true }))
+          return albums.map((a: any) => ({ ...a, isDir: true }))
         }
         return []
       }
@@ -123,7 +123,7 @@ export async function getMusicDirectory(config: SubsonicConfig, id: string): Pro
         const album = data['subsonic-response'].album
         if (album && album.song) {
           const songs = Array.isArray(album.song) ? album.song : [album.song]
-          return songs.map(s => ({ ...s, isDir: false }))
+          return songs.map((s: any) => ({ ...s, isDir: false }))
         }
         return []
       }

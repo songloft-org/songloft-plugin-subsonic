@@ -17,10 +17,10 @@ export async function getConfigs(): Promise<SubsonicConfig[]> {
   try {
     const val = await songloft.storage.get(CONFIG_KEY)
     if (val) {
-      return JSON.parse(val) as SubsonicConfig[]
+      return JSON.parse(val as string) as SubsonicConfig[]
     }
   } catch (err) {
-    songloft.logger.error('Failed to get subsonic configs', String(err))
+    songloft.log.error('Failed to get subsonic configs: ' + String(err))
   }
   return []
 }
