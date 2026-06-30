@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/songloft-org/plugin-toolchain/main/schemas/plugin.schema.json",
   "name": "Subsonic",
-  "version": "2.1.2",
+  "version": "2.2.0",
   "description": "Subsonic 客户端（接入外部音乐库）+ 服务端（对外提供 Subsonic API）",
   "author": "Songloft Team",
   "homepage": "https://github.com/songloft-org/songloft-plugin-subsonic",
@@ -22,7 +22,7 @@
     "/rest"
   ],
   "updateUrl": "https://raw.githubusercontent.com/songloft-org/songloft-plugin-subsonic/main/plugin.json",
-  "download_url": "https://github.com/songloft-org/songloft-plugin-subsonic/releases/download/v2.1.2/subsonic.jsplugin.zip",
+  "download_url": "https://github.com/songloft-org/songloft-plugin-subsonic/releases/download/v2.2.0/subsonic.jsplugin.zip",
   "entryHash": "202f853a1fc3e7b844be015e989177ef6aacb702fd2ee441c609062b39a66d44",
   "zipHash": "016dcb644f3d1e905a16ee2dd4027ff8b259b0ad34b5791362a6f0f6541678a8"
 }
