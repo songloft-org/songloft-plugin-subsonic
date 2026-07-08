@@ -413,16 +413,23 @@ async function submitImport(itemsToImport) {
     const serverName = document.getElementById('browserServerSelect').value
     if (!serverName) return null
     
-    const reqs = itemsToImport.map(item => ({
-        title: item.name,
-        artist: item.artist || 'Unknown',
-        album: item.album || '',
-        cover_url: item.coverArt || '',
-        duration: item.duration || 0,
-        plugin_entry_path: 'subsonic',
-        source_data: JSON.stringify({ configName: serverName, songId: item.id }),
-        dedup_key: `subsonic_${serverName}_${item.id}`
-    }))
+    const reqs = itemsToImport.map(item => {
+        // 列表项已带歌词延迟加载 URL(lyric_source=url),入库时必须一并写入,
+        // 否则宿主 songs 表歌词字段全空,播放时 /songs/{id}/lyric 会 404(songloft-org/songloft#254)。
+        const lyricUrl = item.lyricUrl || item.lyric || ''
+        return {
+            title: item.name,
+            artist: item.artist || 'Unknown',
+            album: item.album || '',
+            cover_url: item.coverArt || '',
+            duration: item.duration || 0,
+            plugin_entry_path: 'subsonic',
+            source_data: JSON.stringify({ configName: serverName, songId: item.id }),
+            dedup_key: `subsonic_${serverName}_${item.id}`,
+            // lyric_remote_url 后端优先级最高,会自动置 lyric_source=url
+            ...(lyricUrl ? { lyric_remote_url: lyricUrl } : {})
+        }
+    })
     
     try {
         // We use absolute path to hit the core API (which is hosted at the root)
