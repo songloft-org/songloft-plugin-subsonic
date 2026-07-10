@@ -266,12 +266,15 @@ const handleGetMusicDirectory: Handler = async (_req, query) => {
 
 const handleSearch3: Handler = async (_req, query) => {
   const q = query.get('query') || ''
-  const songCount = Math.min(parseInt(query.get('songCount') || '20'), 100)
+  const songCount = Math.min(parseInt(query.get('songCount') || '20'), 500)
+  const songOffset = parseInt(query.get('songOffset') || '0')
   const artistCount = Math.min(parseInt(query.get('artistCount') || '20'), 100)
+  const artistOffset = parseInt(query.get('artistOffset') || '0')
   const albumCount = Math.min(parseInt(query.get('albumCount') || '20'), 100)
+  const albumOffset = parseInt(query.get('albumOffset') || '0')
 
-  const songs = await songloft.songs.search(q)
-  const songResults = songs.slice(0, songCount).map(s => songToSubsonic(s))
+  const songs = q ? await songloft.songs.search(q) : await songloft.songs.list({ limit: 100000 })
+  const songResults = songs.slice(songOffset, songOffset + songCount).map(s => songToSubsonic(s))
 
   const artistSet = new Map<string, any>()
   const albumSet = new Map<string, any>()
@@ -288,8 +291,8 @@ const handleSearch3: Handler = async (_req, query) => {
 
   const r = okResponse(query, {
     searchResult3: {
-      artist: Array.from(artistSet.values()).slice(0, artistCount),
-      album: Array.from(albumSet.values()).slice(0, albumCount),
+      artist: Array.from(artistSet.values()).slice(artistOffset, artistOffset + artistCount),
+      album: Array.from(albumSet.values()).slice(albumOffset, albumOffset + albumCount),
       song: songResults,
     }
   })
@@ -302,7 +305,7 @@ const handleSearch2: Handler = async (_req, query) => {
   const artistCount = Math.min(parseInt(query.get('artistCount') || '20'), 100)
   const albumCount = Math.min(parseInt(query.get('albumCount') || '20'), 100)
 
-  const songs = await songloft.songs.search(q)
+  const songs = q ? await songloft.songs.search(q) : await songloft.songs.list({ limit: 100000 })
   const songResults = songs.slice(0, songCount).map(s => songToSubsonic(s))
 
   const artistSet = new Map<string, any>()
