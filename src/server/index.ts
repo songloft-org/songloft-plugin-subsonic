@@ -414,16 +414,31 @@ const handleGetLyrics: Handler = async (_req, query) => {
   const title = query.get('title') || ''
 
   let songId = 0
+  let matchedSong: any = null
   if (title) {
     const songs = await songloft.songs.search(title)
+    const titleLower = title.toLowerCase()
+    const artistLower = artist.toLowerCase()
     let exactMatch: any = null
+    let partialMatch: any = null
     let titleOnly: any = null
     for (const s of songs) {
-      if (artist && s.artist === artist && s.title === title) { exactMatch = s; break }
-      if (!titleOnly && s.title === title) titleOnly = s
+      const sTitle = (s.title || '').toLowerCase()
+      const sArtist = (s.artist || '').toLowerCase()
+      if (sTitle !== titleLower) continue
+      if (artist && sArtist === artistLower) {
+        exactMatch = s
+        break
+      }
+      if (artist && !partialMatch && sArtist.includes(artistLower)) {
+        partialMatch = s
+      }
+      if (!titleOnly) {
+        titleOnly = s
+      }
     }
-    const match = exactMatch || titleOnly
-    if (match) songId = match.id
+    const match = exactMatch || partialMatch || titleOnly
+    if (match) { songId = match.id; matchedSong = match }
   }
 
   if (!songId) {
@@ -435,7 +450,31 @@ const handleGetLyrics: Handler = async (_req, query) => {
   if (data) {
     const lyric = data.lyric || ''
     const plainText = lyric.replace(/\[\d{2}:\d{2}\.\d{2,3}\]/g, '').replace(/\[.*?\]\r?\n?/g, '').trim()
-    const r = okResponse(query, { lyrics: { artist, title, value: plainText } })
+    const structuredLyrics: any[] = []
+    const main = parseLRC(lyric)
+    if (main.line.length > 0) {
+      structuredLyrics.push({
+        lang: 'und',
+        synced: main.synced,
+        line: main.line,
+        ...(matchedSong?.artist ? { displayArtist: matchedSong.artist } : {}),
+        ...(matchedSong?.title ? { displayTitle: matchedSong.title } : {}),
+      })
+    }
+    if (data.tlyric) {
+      const tl = parseLRC(data.tlyric)
+      if (tl.line.length > 0) {
+        structuredLyrics.push({ lang: 'translation', synced: tl.synced, line: tl.line })
+      }
+    }
+    const r = okResponse(query, {
+      lyrics: {
+        artist,
+        title,
+        value: plainText,
+        ...(structuredLyrics.length > 0 ? { structuredLyrics } : {}),
+      }
+    })
     return { statusCode: 200, headers: { 'Content-Type': r.contentType }, body: r.body }
   }
 
