@@ -16,7 +16,8 @@
     "songs.write",
     "playlists.read",
     "playlists.write",
-    "fs:music"
+    "fs:music",
+    "inter-plugin"
   ],
   "publicPaths": [
     "/rest"

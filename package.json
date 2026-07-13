@@ -11,7 +11,7 @@
   },
   "devDependencies": {
     "@songloft/plugin-builder": "^2.4.3",
-    "@songloft/plugin-sdk": "^2.4.3",
+    "@songloft/plugin-sdk": "^2.9.0",
     "typescript": "^5.9.3"
   }
 }
